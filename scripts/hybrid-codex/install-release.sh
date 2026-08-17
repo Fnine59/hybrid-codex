@@ -36,8 +36,16 @@ fi
 archive="hybrid-codex-aarch64-apple-darwin.tar.gz"
 checksum="${archive}.sha256"
 download_dir="$(mktemp -d)"
+launcher_tmp=""
+staging_dir=""
 cleanup() {
   rm -rf "$download_dir"
+  if [[ -n "$launcher_tmp" ]]; then
+    rm -f "$launcher_tmp"
+  fi
+  if [[ -n "$staging_dir" ]]; then
+    rm -rf "$staging_dir"
+  fi
 }
 trap cleanup EXIT
 
@@ -61,15 +69,21 @@ fi
 
 versions_dir="$install_root/versions"
 version_dir="$versions_dir/$release_tag"
+installed_new_version=false
 mkdir -p "$versions_dir" "$bin_dir"
 
+if [[ -L "$version_dir" ]]; then
+  echo "$version_dir 是符号链接，拒绝作为版本目录使用。" >&2
+  exit 4
+fi
 if [[ ! -d "$version_dir" ]]; then
-  staging_dir="$versions_dir/.${release_tag}.tmp.$$"
-  mkdir -p "$staging_dir"
+  staging_dir="$(mktemp -d "$versions_dir/.${release_tag}.tmp.XXXXXX")"
   tar -xzf "$download_dir/$archive" -C "$staging_dir"
   [[ -x "$staging_dir/hybrid-codex" ]]
   [[ -x "$staging_dir/codex-code-mode-host" ]]
   mv "$staging_dir" "$version_dir"
+  staging_dir=""
+  installed_new_version=true
 fi
 
 if [[ ! -x "$version_dir/hybrid-codex" || ! -x "$version_dir/codex-code-mode-host" ]]; then
@@ -82,27 +96,95 @@ if ! jq -e --arg release_tag "$release_tag" '.release_tag == $release_tag' \
   exit 3
 fi
 
-command_link="$bin_dir/hybrid-codex"
-host_link="$bin_dir/codex-code-mode-host"
 current_link="$install_root/current"
-if [[ -e "$command_link" && ! -L "$command_link" ]]; then
-  echo "$command_link 已存在且不是符号链接，拒绝覆盖。" >&2
-  exit 4
-fi
-if [[ -e "$host_link" && ! -L "$host_link" ]]; then
-  echo "$host_link 已存在且不是符号链接，拒绝覆盖。" >&2
-  exit 4
-fi
-if [[ -e "$current_link" && ! -L "$current_link" ]]; then
+command_link="$bin_dir/hybrid-codex"
+launcher_path="$install_root/hybrid-codex-launcher"
+legacy_host_link="$bin_dir/codex-code-mode-host"
+previous_version_dir=""
+
+if [[ ( -e "$current_link" || -L "$current_link" ) && ! -L "$current_link" ]]; then
   echo "$current_link 已存在且不是符号链接，拒绝覆盖。" >&2
   exit 4
 fi
+if [[ -L "$current_link" ]]; then
+  previous_target="$(readlink "$current_link")"
+  previous_name="${previous_target#"$versions_dir/"}"
+  if [[ "$previous_target" == "$versions_dir/"* \
+    && "$previous_name" != */* \
+    && "$previous_name" =~ ^hybrid-v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?-p[1-9][0-9]*$ \
+    && -d "$previous_target" \
+    && ! -L "$previous_target" ]]; then
+    previous_version_dir="$previous_target"
+  elif [[ -e "$current_link" ]]; then
+    echo "$current_link 指向非托管目录，拒绝覆盖。" >&2
+    exit 4
+  fi
+fi
 
+if [[ -e "$command_link" || -L "$command_link" ]]; then
+  if [[ ! -L "$command_link" ]]; then
+    echo "$command_link 已存在且不是符号链接，拒绝覆盖。" >&2
+    exit 4
+  fi
+  command_target="$(readlink "$command_link")"
+  if [[ "$command_target" != "$current_link/hybrid-codex" && "$command_target" != "$launcher_path" ]]; then
+    echo "$command_link 不是本安装器管理的入口，拒绝覆盖。" >&2
+    exit 4
+  fi
+fi
+
+if [[ -e "$launcher_path" || -L "$launcher_path" ]]; then
+  if [[ ! -f "$launcher_path" || -L "$launcher_path" ]] \
+    || ! grep -Fqx '# Managed by the hybrid-codex installer.' "$launcher_path"; then
+    echo "$launcher_path 不是本安装器管理的启动器，拒绝覆盖。" >&2
+    exit 4
+  fi
+fi
+
+launcher_tmp="$(mktemp "$install_root/.hybrid-codex-launcher.XXXXXX")"
+{
+  printf '%s\n' '#!/usr/bin/env bash'
+  printf '%s\n' '# Managed by the hybrid-codex installer.'
+  printf '%s\n' 'set -euo pipefail'
+  printf 'exec %q "$@"\n' "$current_link/hybrid-codex"
+} > "$launcher_tmp"
+chmod 0755 "$launcher_tmp"
+mv -f "$launcher_tmp" "$launcher_path"
+launcher_tmp=""
+ln -sfn "$launcher_path" "$command_link"
 ln -sfn "$version_dir" "$current_link"
-ln -sfn "$current_link/hybrid-codex" "$command_link"
-ln -sfn "$current_link/codex-code-mode-host" "$host_link"
 
-"$command_link" --version
-[[ -x "$host_link" ]]
+if ! "$command_link" --version || [[ ! -x "$current_link/codex-code-mode-host" ]]; then
+  if [[ -n "$previous_version_dir" ]]; then
+    ln -sfn "$previous_version_dir" "$current_link"
+  else
+    rm -f "$current_link"
+  fi
+  if [[ "$installed_new_version" == true ]]; then
+    rm -rf -- "$version_dir"
+  fi
+  echo "新版本启动校验失败，已恢复先前版本。" >&2
+  exit 5
+fi
+
+if [[ -L "$legacy_host_link" ]] \
+  && [[ "$(readlink "$legacy_host_link")" == "$current_link/codex-code-mode-host" ]]; then
+  rm "$legacy_host_link"
+  echo "已移除旧版公共 Code Mode host 入口：$legacy_host_link"
+elif [[ -e "$legacy_host_link" || -L "$legacy_host_link" ]]; then
+  echo "保留非本安装器管理的同名入口：$legacy_host_link" >&2
+fi
+
+if [[ -n "$previous_version_dir" && "$previous_version_dir" != "$version_dir" ]]; then
+  for candidate in "$versions_dir"/hybrid-v*-p*; do
+    [[ -d "$candidate" && ! -L "$candidate" ]] || continue
+    if [[ "$candidate" == "$version_dir" || "$candidate" == "$previous_version_dir" ]]; then
+      continue
+    fi
+    rm -rf -- "$candidate"
+    echo "已清理旧版本：$candidate"
+  done
+fi
+
 echo "已安装 $release_tag 到 $version_dir"
 echo "官方 codex 未修改；补丁命令为 $command_link"
