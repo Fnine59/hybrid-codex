@@ -33,7 +33,12 @@ Release tag 使用 `hybrid-v<官方版本>-p<补丁修订>`，例如 `hybrid-v0.
 scripts/hybrid-codex/install-release.sh latest
 ```
 
-脚本安装到 `~/.local/share/hybrid-codex/versions/<release-tag>/`，并只维护 `~/.local/bin/hybrid-codex` 这一条符号链接。官方 `codex` 的 npm/Homebrew 更新路径不会被修改。切换或回滚只是把这条链接指向另一个版本目录。
+脚本安装到 `~/.local/share/hybrid-codex/versions/<release-tag>/`，通过 `~/.local/share/hybrid-codex/current` 选择当前版本，并维护下面两条稳定入口：
+
+- `~/.local/bin/hybrid-codex`：Hybrid Codex 主程序。
+- `~/.local/bin/codex-code-mode-host`：Code Mode 的配套 host，由主程序按同目录规则发现。
+
+官方 `codex` 的 npm/Homebrew 更新路径不会被修改。切换或回滚只更新 Hybrid 自己的 `current` 链接，两条稳定入口会一起指向同一版本。
 
 macOS 构建由公开仓库的标准 GitHub-hosted runner 产生，没有 OpenAI 官方代码签名；安装脚本会先校验 Release 附带的 SHA-256。
 

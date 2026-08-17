@@ -83,9 +83,14 @@ if ! jq -e --arg release_tag "$release_tag" '.release_tag == $release_tag' \
 fi
 
 command_link="$bin_dir/hybrid-codex"
+host_link="$bin_dir/codex-code-mode-host"
 current_link="$install_root/current"
 if [[ -e "$command_link" && ! -L "$command_link" ]]; then
   echo "$command_link 已存在且不是符号链接，拒绝覆盖。" >&2
+  exit 4
+fi
+if [[ -e "$host_link" && ! -L "$host_link" ]]; then
+  echo "$host_link 已存在且不是符号链接，拒绝覆盖。" >&2
   exit 4
 fi
 if [[ -e "$current_link" && ! -L "$current_link" ]]; then
@@ -93,9 +98,11 @@ if [[ -e "$current_link" && ! -L "$current_link" ]]; then
   exit 4
 fi
 
-ln -sfn "$version_dir/hybrid-codex" "$command_link"
 ln -sfn "$version_dir" "$current_link"
+ln -sfn "$current_link/hybrid-codex" "$command_link"
+ln -sfn "$current_link/codex-code-mode-host" "$host_link"
 
 "$command_link" --version
+[[ -x "$host_link" ]]
 echo "已安装 $release_tag 到 $version_dir"
 echo "官方 codex 未修改；补丁命令为 $command_link"
