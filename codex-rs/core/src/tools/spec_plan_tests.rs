@@ -2395,6 +2395,43 @@ async fn multi_agent_v2_can_use_configured_tool_namespace() {
 }
 
 #[tokio::test]
+async fn multi_agent_v2_plaintext_delivery_updates_namespaced_message_schemas() {
+    let plan = probe(|turn| {
+        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
+        update_config(turn, |config| {
+            config.multi_agent_v2.tool_namespace = Some("agents".to_string());
+            config.multi_agent_v2.message_delivery =
+                codex_features::MultiAgentMessageDelivery::Plaintext;
+        });
+    })
+    .await;
+
+    let ToolSpec::Namespace(namespace) = plan.visible_spec("agents") else {
+        panic!("configured MultiAgentV2 tools should use the agents namespace");
+    };
+    for tool_name in ["spawn_agent", "send_message", "followup_task"] {
+        let tool = namespace
+            .tools
+            .iter()
+            .find_map(|tool| match tool {
+                ResponsesApiNamespaceTool::Function(tool) if tool.name == tool_name => Some(tool),
+                ResponsesApiNamespaceTool::Function(_) | ResponsesApiNamespaceTool::Custom(_) => {
+                    None
+                }
+            })
+            .unwrap_or_else(|| panic!("expected {tool_name} in agents namespace"));
+        assert_eq!(
+            tool.parameters
+                .properties
+                .as_ref()
+                .and_then(|properties| properties.get("message"))
+                .and_then(|schema| schema.encrypted),
+            None
+        );
+    }
+}
+
+#[tokio::test]
 async fn multi_agent_v2_namespace_is_supported_by_bedrock_provider() {
     let plan = probe(|turn| {
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);

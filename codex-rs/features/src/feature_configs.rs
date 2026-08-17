@@ -77,6 +77,17 @@ impl FeatureConfig for NonPrefixedMcpToolNamesConfigToml {
     }
 }
 
+/// Controls how MultiAgentV2 task and message payloads are delivered.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MultiAgentMessageDelivery {
+    /// Preserve the existing provider-opaque encrypted payload.
+    #[default]
+    Encrypted,
+    /// Deliver and persist one plaintext message.
+    Plaintext,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MultiAgentV2ConfigToml {
@@ -111,6 +122,9 @@ pub struct MultiAgentV2ConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1, max = 64), regex(pattern = r"^[a-zA-Z0-9_-]+$"))]
     pub tool_namespace: Option<String>,
+    /// Selects encrypted or plaintext delivery for MultiAgentV2 tasks and messages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_delivery: Option<MultiAgentMessageDelivery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hide_spawn_agent_metadata: Option<bool>,
     /// Exposes `model` and `reasoning_effort` on the multi-agent v2 spawn tool and adds

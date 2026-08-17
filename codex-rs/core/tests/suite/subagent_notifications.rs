@@ -2,6 +2,7 @@ use anyhow::Result;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadConfigSnapshot;
 use codex_core::config::AgentRoleConfig;
+use codex_core::config::MultiAgentMessageDelivery;
 use codex_features::Feature;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::ThreadId;
@@ -1400,14 +1401,16 @@ async fn spawned_multi_agent_v2_child_inherits_parent_developer_context() -> Res
     Ok(())
 }
 
-#[test_case(None, false; "encrypted")]
-#[test_case(None, true; "plaintext")]
-#[test_case(Some("gpt-5.6-luna"), false; "luna encrypted leaf")]
-#[test_case(Some("gpt-5.5"), false; "legacy encrypted leaf")]
+#[test_case(None, false, false; "encrypted")]
+#[test_case(None, true, false; "legacy plaintext marker")]
+#[test_case(None, true, true; "configured plaintext")]
+#[test_case(Some("gpt-5.6-luna"), false, false; "luna encrypted leaf")]
+#[test_case(Some("gpt-5.5"), false, false; "legacy encrypted leaf")]
 #[tokio::test]
 async fn multi_agent_v2_spawn_sends_agent_message_to_child(
     model: Option<&str>,
     plaintext: bool,
+    configured_plaintext: bool,
 ) -> Result<()> {
     let output: &'static Mutex<Vec<u8>> = Box::leak(Box::new(Mutex::new(Vec::new())));
     let subscriber = tracing_subscriber::fmt()
@@ -1434,13 +1437,14 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
         }
     }
     let spawn_args = serde_json::to_string(&spawn_args)?;
-    let mut spawn_event = ev_function_call_with_namespace(
-        SPAWN_CALL_ID,
-        MULTI_AGENT_V2_NAMESPACE,
-        "spawn_agent",
-        &spawn_args,
-    );
-    if plaintext {
+    let namespace = if configured_plaintext {
+        "agents"
+    } else {
+        MULTI_AGENT_V2_NAMESPACE
+    };
+    let mut spawn_event =
+        ev_function_call_with_namespace(SPAWN_CALL_ID, namespace, "spawn_agent", &spawn_args);
+    if plaintext && !configured_plaintext {
         spawn_event["item"]["encrypted_function_args"] = json!([]);
     }
     mount_sse_once_match(
@@ -1480,16 +1484,22 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
     } else {
         "koffing"
     };
-    let mut builder = test_codex().with_model(parent_model).with_config(|config| {
-        config
-            .features
-            .enable(Feature::Collab)
-            .expect("test config should allow feature update");
-        config
-            .features
-            .enable(Feature::MultiAgentV2)
-            .expect("test config should allow feature update");
-    });
+    let mut builder = test_codex()
+        .with_model(parent_model)
+        .with_config(move |config| {
+            config
+                .features
+                .enable(Feature::Collab)
+                .expect("test config should allow feature update");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("test config should allow feature update");
+            if configured_plaintext {
+                config.multi_agent_v2.message_delivery = MultiAgentMessageDelivery::Plaintext;
+                config.multi_agent_v2.tool_namespace = Some("agents".to_string());
+            }
+        });
     let test = builder.build(&server).await?;
     let root_thread_id = test.session_configured.thread_id;
 
@@ -1556,10 +1566,14 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
             parent_request_log.requests().into_iter().any(|request| {
                 request.input().iter().any(|item| {
                     item["call_id"].as_str() == Some(SPAWN_CALL_ID)
-                        && item["encrypted_function_args"] == json!([])
+                        && if configured_plaintext {
+                            item.get("encrypted_function_args").is_none()
+                        } else {
+                            item["encrypted_function_args"] == json!([])
+                        }
                 })
             }),
-            "plaintext function-call metadata should survive replay"
+            "plaintext function-call representation should survive replay"
         );
     }
 

@@ -95,6 +95,17 @@ async fn handle_spawn_agent(
         turn.as_ref(),
         step_context.environments.primary(),
     )?;
+    if !config.model_provider.is_openai()
+        && !matches!(
+            &source,
+            crate::tools::context::ToolCallSource::DirectPlaintextMessage
+        )
+    {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "MultiAgentV2 cannot deliver an encrypted task to non-OpenAI child provider `{}`. Set `[features.multi_agent_v2] message_delivery = \"plaintext\"` and use a non-reserved `tool_namespace` such as `agents`.",
+            config.model_provider_id
+        )));
+    }
 
     let spawn_source = thread_spawn_source(
         session.thread_id,

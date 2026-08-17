@@ -228,13 +228,53 @@ async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()
     );
     assert_eq!(call.call_id, "call-namespace");
     assert_eq!(call.encrypted_function_args, Some(Vec::new()));
-    assert_eq!(call.direct_source(), ToolCallSource::Direct);
+    let (_, turn) = make_session_and_context().await;
+    assert_eq!(call.direct_source(&turn), ToolCallSource::Direct);
     match call.payload {
         ToolPayload::Function { arguments } => {
             assert_eq!(arguments, "{}");
         }
         other => panic!("expected function payload, got {other:?}"),
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn direct_source_uses_configured_plaintext_namespace() -> anyhow::Result<()> {
+    let (_, mut turn) = make_session_and_context().await;
+    let mut config = (*turn.config).clone();
+    config.multi_agent_v2.message_delivery = codex_features::MultiAgentMessageDelivery::Plaintext;
+    config.multi_agent_v2.tool_namespace = Some("agents".to_string());
+    turn.multi_agent_version = codex_protocol::protocol::MultiAgentVersion::V2;
+    turn.config = Arc::new(config);
+
+    let call = ToolCall {
+        tool_name: ToolName::namespaced("agents", "spawn_agent"),
+        call_id: "call-plaintext".to_string(),
+        payload: ToolPayload::Function {
+            arguments: json!({"message": "inspect", "task_name": "worker"}).to_string(),
+        },
+        encrypted_function_args: None,
+    };
+
+    assert_eq!(
+        call.direct_source(&turn),
+        ToolCallSource::DirectPlaintextMessage
+    );
+    assert_eq!(
+        call.direct_source_with_plaintext_namespace(Some(DEFAULT_FUNCTION_NAMESPACE)),
+        ToolCallSource::Direct
+    );
+
+    let unnamespaced_call = ToolCall {
+        tool_name: ToolName::namespaced(DEFAULT_FUNCTION_NAMESPACE, "send_message"),
+        ..call
+    };
+    assert_eq!(
+        unnamespaced_call.direct_source_with_plaintext_namespace(Some(DEFAULT_FUNCTION_NAMESPACE)),
+        ToolCallSource::DirectPlaintextMessage
+    );
 
     Ok(())
 }

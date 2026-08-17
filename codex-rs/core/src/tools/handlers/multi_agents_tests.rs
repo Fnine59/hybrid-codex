@@ -79,6 +79,22 @@ fn invocation(
     tool_name: &str,
     payload: ToolPayload,
 ) -> ToolInvocation {
+    invocation_with_source(
+        session,
+        turn,
+        tool_name,
+        payload,
+        crate::tools::context::ToolCallSource::Direct,
+    )
+}
+
+fn invocation_with_source(
+    session: Arc<crate::session::session::Session>,
+    turn: Arc<TurnContext>,
+    tool_name: &str,
+    payload: ToolPayload,
+    source: crate::tools::context::ToolCallSource,
+) -> ToolInvocation {
     let step_context = StepContext::for_test(Arc::clone(&turn));
     ToolInvocation {
         session,
@@ -88,7 +104,7 @@ fn invocation(
         tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
         call_id: "call-1".to_string(),
         tool_name: codex_tools::ToolName::plain(tool_name),
-        source: crate::tools::context::ToolCallSource::Direct,
+        source,
         payload,
     }
 }
@@ -898,6 +914,7 @@ async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
         .features
         .enable(Feature::MultiAgentV2)
         .expect("test config should allow feature update");
+    config.multi_agent_v2.message_delivery = crate::config::MultiAgentMessageDelivery::Plaintext;
     let turn = TurnContext {
         config: Arc::new(config),
         multi_agent_version: codex_protocol::protocol::MultiAgentVersion::V2,
@@ -905,7 +922,7 @@ async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
     };
 
     let output = SpawnAgentHandlerV2::default()
-        .handle(invocation(
+        .handle(invocation_with_source(
             Arc::new(session),
             Arc::new(turn),
             "spawn_agent",
@@ -915,6 +932,7 @@ async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
                 "agent_type": role_name,
                 "fork_turns": "1"
             })),
+            crate::tools::context::ToolCallSource::DirectPlaintextMessage,
         ))
         .await
         .expect("partial fork should allow agent_type overrides");
@@ -938,6 +956,59 @@ async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
     assert_eq!(snapshot.model, "gpt-5-role-override");
     assert_eq!(snapshot.model_provider_id, "ollama");
     assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Minimal));
+    assert!(manager.captured_ops().iter().any(|(id, op)| {
+        *id == agent_id
+            && matches!(
+                op,
+                Op::InterAgentCommunication { communication }
+                    if communication.content.contains("inspect this repo")
+                        && communication.encrypted_content.is_none()
+            )
+    }));
+}
+
+#[tokio::test]
+async fn multi_agent_v2_encrypted_spawn_rejects_non_openai_child_before_creation() {
+    let (mut session, mut turn) = make_session_and_context().await;
+    let role_name = install_role_with_model_override(&mut turn).await;
+    let mut config = (*turn.config).clone();
+    config
+        .features
+        .enable(Feature::MultiAgentV2)
+        .expect("test config should allow feature update");
+    set_turn_config(&mut turn, config);
+    let manager = thread_manager();
+    let root = manager
+        .start_thread(StartThreadOptions::new((*turn.config).clone()))
+        .await
+        .expect("root thread should start");
+    session.services.agent_control = manager.agent_control();
+    session.thread_id = root.thread_id;
+
+    let err = SpawnAgentHandlerV2::default()
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "task_name": "third_party",
+                "agent_type": role_name,
+                "fork_turns": "none"
+            })),
+        ))
+        .await
+        .err()
+        .expect("encrypted cross-provider spawn should fail before child creation");
+
+    assert_eq!(
+        err,
+        FunctionCallError::RespondToModel(
+            "MultiAgentV2 cannot deliver an encrypted task to non-OpenAI child provider `ollama`. Set `[features.multi_agent_v2] message_delivery = \"plaintext\"` and use a non-reserved `tool_namespace` such as `agents`."
+                .to_string()
+        )
+    );
+    assert_eq!(manager.list_thread_ids().await, vec![root.thread_id]);
 }
 
 #[tokio::test]
@@ -1128,7 +1199,7 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
             )
     }));
 
-    SendMessageHandlerV2
+    SendMessageHandlerV2::default()
         .handle(invocation(
             session.clone(),
             turn.clone(),
@@ -1324,7 +1395,7 @@ async fn multi_agent_v2_send_message_accepts_root_target_from_child() {
         agent_role: None,
     });
 
-    SendMessageHandlerV2
+    SendMessageHandlerV2::default()
         .handle(invocation(
             Arc::new(session),
             Arc::new(turn),
@@ -1400,7 +1471,7 @@ async fn multi_agent_v2_followup_task_rejects_root_target_from_child() {
         agent_role: None,
     });
 
-    let Err(err) = FollowupTaskHandlerV2
+    let Err(err) = FollowupTaskHandlerV2::default()
         .handle(invocation(
             Arc::new(session),
             Arc::new(turn),
@@ -1782,7 +1853,7 @@ async fn multi_agent_v2_send_message_rejects_legacy_items_field() {
         })),
     );
 
-    let Err(err) = SendMessageHandlerV2.handle(invocation).await else {
+    let Err(err) = SendMessageHandlerV2::default().handle(invocation).await else {
         panic!("legacy items field should be rejected in v2");
     };
     let FunctionCallError::RespondToModel(message) = err else {
@@ -1837,7 +1908,7 @@ async fn multi_agent_v2_send_message_rejects_interrupt_parameter() {
         })),
     );
 
-    let Err(err) = SendMessageHandlerV2.handle(invocation).await else {
+    let Err(err) = SendMessageHandlerV2::default().handle(invocation).await else {
         panic!("send_message interrupt parameter should be rejected");
     };
     let FunctionCallError::RespondToModel(message) = err else {
@@ -1925,7 +1996,7 @@ async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn()
         )
         .await;
 
-    FollowupTaskHandlerV2
+    FollowupTaskHandlerV2::default()
         .handle(invocation(
             session,
             turn,
@@ -2065,7 +2136,7 @@ async fn multi_agent_v2_followup_task_rejects_legacy_items_field() {
         })),
     );
 
-    let Err(err) = FollowupTaskHandlerV2.handle(invocation).await else {
+    let Err(err) = FollowupTaskHandlerV2::default().handle(invocation).await else {
         panic!("legacy items field should be rejected in v2");
     };
     let FunctionCallError::RespondToModel(message) = err else {

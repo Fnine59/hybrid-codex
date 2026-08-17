@@ -10923,6 +10923,7 @@ subagent_usage_hint_text = "Subagent guidance."
 subagent_developer_instructions = "  Delegate carefully.  "
 multi_agent_mode_hint_text = "Custom mode guidance."
 tool_namespace = "agents"
+message_delivery = "plaintext"
 hide_spawn_agent_metadata = true
 expose_spawn_agent_model_overrides = false
 wait_agent_enabled = false
@@ -10977,6 +10978,10 @@ max_concurrent_threads_per_session = 9
     assert_eq!(
         config.multi_agent_v2.tool_namespace.as_deref(),
         Some("agents")
+    );
+    assert_eq!(
+        config.multi_agent_v2.message_delivery,
+        MultiAgentMessageDelivery::Plaintext
     );
     assert!(config.multi_agent_v2.hide_spawn_agent_metadata);
     assert!(!config.multi_agent_v2.expose_spawn_agent_model_overrides);

@@ -1,7 +1,6 @@
 use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
-#[cfg(test)]
 use crate::session::turn_context::TurnContext;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
@@ -14,8 +13,10 @@ use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::registry::ToolRegistry;
 #[cfg(test)]
 use crate::tools::spec_plan::finalize_tool_router;
+use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SearchToolCallParams;
+use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::DiscoverableTool;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
@@ -37,17 +38,41 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    pub(crate) fn direct_source(&self) -> ToolCallSource {
-        if self.tool_name.namespace.as_deref() == Some("collaboration")
-            && matches!(
-                self.tool_name.name.as_str(),
-                "spawn_agent" | "send_message" | "followup_task"
-            )
+    pub(crate) fn direct_source(&self, turn_context: &TurnContext) -> ToolCallSource {
+        let plaintext_namespace = (turn_context.multi_agent_version == MultiAgentVersion::V2
+            && turn_context.config.multi_agent_v2.message_delivery
+                == codex_features::MultiAgentMessageDelivery::Plaintext)
+            .then(|| {
+                if turn_context.provider.capabilities().namespace_tools {
+                    turn_context
+                        .config
+                        .multi_agent_v2
+                        .tool_namespace
+                        .as_deref()
+                        .unwrap_or(DEFAULT_FUNCTION_NAMESPACE)
+                } else {
+                    DEFAULT_FUNCTION_NAMESPACE
+                }
+            });
+        self.direct_source_with_plaintext_namespace(plaintext_namespace)
+    }
+
+    pub(crate) fn direct_source_with_plaintext_namespace(
+        &self,
+        plaintext_namespace: Option<&str>,
+    ) -> ToolCallSource {
+        let is_message_tool = matches!(
+            self.tool_name.name.as_str(),
+            "spawn_agent" | "send_message" | "followup_task"
+        );
+        let legacy_plaintext_marker = self.tool_name.namespace.as_deref() == Some("collaboration")
             && self
                 .encrypted_function_args
                 .as_ref()
-                .is_some_and(Vec::is_empty)
-        {
+                .is_some_and(Vec::is_empty);
+        let configured_plaintext = plaintext_namespace
+            .is_some_and(|namespace| self.tool_name.namespace.as_deref() == Some(namespace));
+        if is_message_tool && (legacy_plaintext_marker || configured_plaintext) {
             ToolCallSource::DirectPlaintextMessage
         } else {
             ToolCallSource::Direct
