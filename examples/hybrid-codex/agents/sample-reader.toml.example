@@ -1,0 +1,8 @@
+name = "explorer"
+description = "使用示例第三方 Provider 的只读角色。"
+model_provider = "example_provider"
+model = "example-model"
+developer_instructions = """
+只做读取、搜索、分析和报告，不修改文件或外部状态。
+只使用 message 中提供的上下文，不要创建其他子 Agent。
+"""

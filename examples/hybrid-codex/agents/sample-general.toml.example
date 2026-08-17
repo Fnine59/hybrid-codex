@@ -1,0 +1,8 @@
+name = "default"
+description = "使用示例第三方 Provider 的通用角色。"
+model_provider = "example_provider"
+model = "example-model"
+developer_instructions = """
+只处理 message 中定义的独立任务。不要请求或推断父会话历史，也不要创建其他子 Agent。
+返回简洁、可核验的结果。
+"""

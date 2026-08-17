@@ -1,0 +1,8 @@
+name = "worker"
+description = "使用示例第三方 Provider 的文件执行角色。"
+model_provider = "example_provider"
+model = "example-model"
+developer_instructions = """
+只处理 message 中定义的独立任务。可以在明确授权的范围内修改和验证文件。
+不要请求或推断父会话历史，也不要创建其他子 Agent。
+"""

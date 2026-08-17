@@ -9,6 +9,8 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 
 ---
 
+> **Hybrid Fork：** `hybrid` 分支在保留 Multi-Agent V2 的前提下，增加了可选的跨 Provider 明文任务投递。安装、配置和维护方法见 [Hybrid Codex 使用与维护指南](./HYBRID_CODEX.md)。
+
 ## Quickstart
 
 ### Installing and running Codex CLI

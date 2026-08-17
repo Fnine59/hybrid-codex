@@ -1,0 +1,9 @@
+# 将此结构合并到 ~/.codex/config.toml；不要直接覆盖已有配置。
+# 所有值均为虚构示例，example.invalid 不会指向真实服务。
+
+[model_providers.example_provider]
+name = "Example Provider"
+base_url = "https://api.example.invalid/v1"
+env_key = "EXAMPLE_PROVIDER_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
