@@ -109,7 +109,7 @@ hybrid-codex --profile hybrid debug prompt-input "配置加载检查"
 
 - `main`：保持为 `openai/codex` 的干净镜像，便于普通 Fork 同步。
 - `hybrid`：默认分支，包含补丁、测试、Action 和维护脚本。
-- 官方发布新版本后，`scripts/hybrid-codex/sync-upstream.sh` 会先快进 `main`，再把新的官方 Release tag 合并进 `hybrid`。没有冲突时运行补丁测试、推送并触发新 Release；发生冲突时中止合并，留给人工处理。
+- 官方发布新版本后，`scripts/hybrid-codex/sync-upstream.sh` 会先快进 `main`，再把新的官方 Release tag 合并进 `hybrid`，随后运行补丁测试、推送并触发新 Release。发生合并冲突时，默认由维护 Loop 自行解决：完成合并、重跑补丁测试、提交并推送后继续触发新 Release；只有冲突触及补丁核心能力（MultiAgentV2 明文跨 Provider 投递）本身、导致补丁没必要或不成立时，才中止并留给人工处理。测试失败一律中止并通知，不会绕过测试或强推。
 
 Release tag 使用 `hybrid-v<官方版本>-p<补丁修订>`，例如 `hybrid-v0.147.0-p1`。这让官方版本和本 Fork 的补丁迭代都能单独识别。
 
@@ -138,6 +138,6 @@ scripts/hybrid-codex/release-status.sh
 这个只读命令输出 JSON，包含最新官方 tag、补丁分支是否已包含它、对应 Hybrid Release 是否存在，以及本机是否已经安装该 Release。它适合由本机 Codex Loop 定时调用。
 
 Loop 每轮的判断和后续处理规则保存在
-`scripts/hybrid-codex/LOOP_TASK.md`。它把状态分为“需要同步源码”“等待或检查构建”“安装已发布版本”和“已经是最新”四种情况；同步、构建、安装仍分别由上述可审计脚本执行。合并冲突或测试失败只通知，不会强推或绕过测试。
+`scripts/hybrid-codex/LOOP_TASK.md`。它把状态分为“需要同步源码”“等待或检查构建”“安装已发布版本”和“已经是最新”四种情况；同步、构建、安装仍分别由上述可审计脚本执行。合并冲突默认由 Loop 自行解决并继续流程，只有冲突触及补丁核心能力本身时才停下来询问用户；测试失败一律停止并通知，不会强推或绕过测试。
 
 公开仓库只保存通用源代码、构建流程和无凭据示例。Provider 地址、API Key、实际模型 ID、修改后的 Profile、Alias 以及真实跨 Provider 验收结果全部留在本机。GitHub Actions 只做不含凭据的单元测试、模拟集成测试和二进制构建；真实验收必须由本机的新会话完成。
