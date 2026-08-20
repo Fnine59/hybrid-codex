@@ -12,6 +12,14 @@
 备注：本机跑过 `test-patch.sh` 等 cargo 命令后，`codex-rs/Cargo.lock` 会被 cargo 规范化
 （workspace 内部 crate 版本从上游约定的 `0.0.0` 变成实际版本）。这是预期的本地产物，不影响
 构建；同步前用 `git restore codex-rs/Cargo.lock` 丢弃即可，不要提交。
+
+备注：`sync-upstream.sh` 中的 `git fetch upstream --tags` 遇到上游强制更新的 tag（如 alpha
+tag）会因 "would clobber existing tag" 失败并中断脚本。此时先执行 `git fetch upstream
+--tags --force` 再重跑脚本。
+
+备注：本仓库是 blob:none 部分克隆，promisor 是 origin。合并新的上游 tag 时可能因 origin
+尚没有该 tag 的对象而报 "could not fetch ... from promisor remote"。此时先执行
+`git fetch upstream <tag> --no-tags` 从上游直接补齐对象，再重跑脚本。
 4. 如果 `release_current` 为 `true` 而 `installed_current` 为 `false`，运行
    `scripts/hybrid-codex/install-release.sh latest`，然后核对 `hybrid-codex --version` 与
    `~/.local/share/hybrid-codex/current/manifest.json`。只更新 Hybrid Codex 的版本化安装和符号链接。
